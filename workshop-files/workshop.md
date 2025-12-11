@@ -187,7 +187,7 @@ By the end of this workshop, you will understand:
    ```
 
 #### Exercise 4.2: Test Redis Persistence
-
+ e
 1. **Check Redis persistence settings:**
    ```bash
    docker-compose exec redis redis-cli CONFIG GET save

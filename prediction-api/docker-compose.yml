@@ -25,7 +25,7 @@ services:
       - REDIS_PORT=6379
       - MODEL_PATH=/app/models/timeseries_model.pkl
       - DATA_PATH=/app/data
-      - LOOKBACK_WINDOW=20
+      - LOOKBACK_WINDOW=10
     volumes:
       - model_artifacts:/app/models      # Shared model storage only
     depends_on:

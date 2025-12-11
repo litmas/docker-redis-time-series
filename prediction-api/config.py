@@ -19,6 +19,9 @@ class Config:
     MODEL_PATH = os.getenv('MODEL_PATH', '/app/models/timeseries_model.pkl')
     LOOKBACK_WINDOW = int(os.getenv('LOOKBACK_WINDOW', 20))
     DATA_PATH = os.getenv('DATA_PATH', '/app/data')
+    PRICE_LOOKBACK = int(os.getenv('PRICE_LOOKBACK', 24))
+    MIN_POINTS = int(os.getenv('MIN_POINTS', 6))
+    DEFAULT_HORIZON_MINUTES = int(os.getenv('DEFAULT_HORIZON_MINUTES', 60))
 
     # Flask Settings
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -30,6 +33,24 @@ class Config:
     MAX_DATA_POINTS_PER_REQUEST = int(
         os.getenv('MAX_DATA_POINTS_PER_REQUEST', 1000))
     MAX_SERIES_PER_INSTANCE = int(os.getenv('MAX_SERIES_PER_INSTANCE', 100))
+    PRICE_THRESHOLD = float(os.getenv('PRICE_THRESHOLD', 80.0))
+    LOW_PRICE_THRESHOLD = float(os.getenv('LOW_PRICE_THRESHOLD', 25.0))
+    OFFPEAK_HOURS = os.getenv('OFFPEAK_HOURS', '0-6,22-23')
+    SPIKE_DELTA_PCT = float(os.getenv('SPIKE_DELTA_PCT', 15.0))
+    FORECAST_HORIZON_MINUTES = int(os.getenv('FORECAST_HORIZON_MINUTES', 240))
+    FORECAST_POINTS = int(os.getenv('FORECAST_POINTS', 4))
+    HISTORY_LOOKBACK_POINTS = int(os.getenv('HISTORY_LOOKBACK_POINTS', 48))
+    PROCESS_EVERY_N = int(os.getenv('PROCESS_EVERY_N', 1))  # sample stream load (1=all messages)
+    MAX_MESSAGES_PER_SECOND = int(os.getenv('MAX_MESSAGES_PER_SECOND', 200))  # backpressure guard
+
+    # Streaming / Message Bus
+    ENABLE_STREAM_CONSUMER = os.getenv('ENABLE_STREAM_CONSUMER', 'true').lower() in ['true', '1', 'yes']
+    KAFKA_BROKERS = os.getenv('KAFKA_BROKERS', '194.47.171.153:30092')
+    ENERGY_TOPIC = os.getenv('ENERGY_TOPIC', 'meter-readings')
+    PROCESSED_TOPIC = os.getenv('PROCESSED_TOPIC', 'energy-processed')
+    CONSUMER_GROUP = os.getenv('CONSUMER_GROUP', 'algorithm-processor')
+    STREAM_HORIZON_MINUTES = int(os.getenv('STREAM_HORIZON_MINUTES', 60))
+    MAX_STREAM_BUFFER = int(os.getenv('MAX_STREAM_BUFFER', 48))
 
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')

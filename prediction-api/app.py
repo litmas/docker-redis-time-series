@@ -10,13 +10,15 @@ import os
 from typing import List, Dict, Any
 import traceback
 from config import config
+from spot_price_predictor import SpotPricePredictor
+from processor_service import build_algorithm_processor, start_consumer_if_enabled
 
 # Get configuration based on environment
 config_name = os.getenv('FLASK_ENV', 'default')
 app_config = config[config_name]
 
-# Configure logging
-logging.basicConfig(level=getattr(logging, app_config.LOG_LEVEL))
+# Configure logging (JSON-friendly messages for Kubernetes)
+logging.basicConfig(level=getattr(logging, app_config.LOG_LEVEL), format='%(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -159,6 +161,12 @@ class TimeSeriesPredictor:
 
 # Initialize predictor
 predictor = TimeSeriesPredictor()
+spot_price_predictor = SpotPricePredictor(
+    lookback=app_config.PRICE_LOOKBACK,
+    min_points=app_config.MIN_POINTS
+)
+algorithm_processor = build_algorithm_processor(app_config, redis_client)
+stream_processor = start_consumer_if_enabled(app_config, algorithm_processor)
 
 
 @app.route('/', methods=['GET'])
@@ -181,6 +189,22 @@ def root():
                     {'timestamp': '2025-01-01T01:00:00', 'value': 101.0}
                 ]
             }
+        },
+        'predict_spot_price': {
+            'url': '/predict/spot-price',
+            'method': 'POST',
+            'description': 'Predict near-term electricity spot price with DSM action',
+            'example': {
+                'records': [
+                    {'DateTime': '2020-01-06 16:00:00', 'Price': 34.05, 'AREA': 'Stensö'}
+                ],
+                'horizon_minutes': 60
+            }
+        },
+        'process_message': {
+            'url': '/process/message',
+            'method': 'POST',
+            'description': 'Run full algorithm processor decision flow on a single incoming message'
         },
         'add_data': {
             'url': '/add_data',
@@ -243,7 +267,9 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
         'redis_connected': redis_client is not None,
-        'model_loaded': predictor.model is not None
+        'model_loaded': predictor.model is not None,
+        'algorithm_processor_ready': algorithm_processor is not None,
+        'stream_consumer_running': stream_processor is not None and app_config.ENABLE_STREAM_CONSUMER
     }
 
     if redis_client:
@@ -308,6 +334,86 @@ def validate_data_point(point, series_id):
         
     except Exception as e:
         return False, f"Validation error: {str(e)}", None
+
+
+@app.route('/predict/spot-price', methods=['POST'])
+def predict_spot_price():
+    """Predict near-term electricity spot price and suggest DSM action."""
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({'error': 'No JSON data provided'}), 400
+
+    records = payload.get('records') or payload.get('data') or payload.get('historical_data')
+    if not records or not isinstance(records, list):
+        return jsonify({'error': "Payload must include 'records' as a non-empty list"}), 400
+
+    try:
+        horizon = int(payload.get('horizon_minutes', app_config.DEFAULT_HORIZON_MINUTES))
+    except (TypeError, ValueError):
+        horizon = app_config.DEFAULT_HORIZON_MINUTES
+
+    try:
+        result = spot_price_predictor.predict(records, horizon_minutes=horizon)
+    except ValueError as exc:
+        logger.warning(f"Validation error on spot price prediction: {exc}")
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        logger.error(f"Spot price prediction failed: {exc}")
+        return jsonify({'error': 'Prediction failed', 'details': str(exc)}), 500
+
+    prediction_key = f"predicted_price_next_{horizon}min"
+    response = {
+        prediction_key: result.predicted_price,
+        'confidence': result.confidence,
+        'trend': result.trend,
+        'change_pct': result.change_pct,
+        'volatility': result.volatility,
+        'explanation': result.explanation,
+        'recommendation': result.recommendation,
+        'metadata': {
+            'horizon_minutes': result.horizon_minutes,
+            'lookback_used': result.lookback_used,
+            'supporting_points': result.supporting_points,
+            'interval_minutes': result.interval_minutes,
+        }
+    }
+
+    logger.info(json.dumps({
+        'event': 'spot_price_prediction',
+        'prediction': response[prediction_key],
+        'confidence': response['confidence'],
+        'trend': response['trend'],
+        'horizon_minutes': horizon
+    }))
+
+    return jsonify(response), 200
+
+
+@app.route('/process/message', methods=['POST'])
+def process_message():
+    """Run the full algorithm processor decision flow on a single message."""
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+
+    try:
+        decision = algorithm_processor.process(payload)
+        response = {
+            'actionType': decision.action_type,
+            'currentPrice': decision.current_price,
+            'threshold': decision.threshold,
+            'predictedValues': decision.predicted_values,
+            'predictedSpike': decision.predicted_spike,
+            'confidenceScore': decision.confidence_score,
+            'timestamp': decision.timestamp.isoformat(),
+            'explanation': decision.explanation
+        }
+        return jsonify(response), 200
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        logger.error(f"Processing failed: {exc}")
+        return jsonify({'error': 'Processing failed', 'details': str(exc)}), 500
 
 
 @app.route('/predict', methods=['POST'])
